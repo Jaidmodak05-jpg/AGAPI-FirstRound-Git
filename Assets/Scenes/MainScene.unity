@@ -724,9 +724,9 @@ MonoBehaviour:
   comboText: {fileID: 77404184}
   timerText: {fileID: 1761015969}
   audioMgr: {fileID: 1304800187}
-  rows: 4
-  cols: 3
-  startingTime: 20
+  rows: 5
+  cols: 4
+  startingTime: 30
   gameOverPanel: {fileID: 25602193}
   finalScoreText: {fileID: 29175462}
   bestScoreText: {fileID: 848197192}
@@ -1561,7 +1561,8 @@ MonoBehaviour:
   flipClip: {fileID: 8300000, guid: ffeffd1aa2449c64eb794fafbcb1458e, type: 3}
   matchClip: {fileID: 8300000, guid: 989373d11132ecf4aa606372e1b5c992, type: 3}
   missClip: {fileID: 8300000, guid: 33f37093d3a3c5e44afbbfdcbb8a5857, type: 3}
-  gameOverClip: {fileID: 8300000, guid: d44c5a1db37a46b4f95c0daaff62bec6, type: 3}
+  gameOverClip: {fileID: 8300000, guid: 2eaadcaf413accc48986a3eb9e3e3c80, type: 3}
+  winClip: {fileID: 8300000, guid: d44c5a1db37a46b4f95c0daaff62bec6, type: 3}
 --- !u!4 &1304800188
 Transform:
   m_ObjectHideFlags: 0

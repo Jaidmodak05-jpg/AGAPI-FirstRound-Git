@@ -6,7 +6,8 @@ public class AudioManager : MonoBehaviour
     public AudioClip flipClip;
     public AudioClip matchClip;
     public AudioClip missClip;
-    public AudioClip gameOverClip;
+    public AudioClip gameOverClip;   // time-up / lose
+    public AudioClip winClip;        // NEW: win jingle
 
     AudioSource src;
 
@@ -36,5 +37,10 @@ public class AudioManager : MonoBehaviour
     public void GameOver()
     {
         if (gameOverClip) src.PlayOneShot(gameOverClip);
+    }
+
+    public void Win()   // NEW
+    {
+        if (winClip) src.PlayOneShot(winClip);
     }
 }

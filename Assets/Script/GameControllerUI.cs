@@ -6,37 +6,36 @@ using System.Collections.Generic;
 public class GameControllerUI : MonoBehaviour
 {
     [Header("Refs")]
-    public GridGeneratorUI grid;
-    public RectTransform board;
+    public GridGeneratorUI grid;        // your spawner
+    public RectTransform board;         // parent that holds the spawned cards
 
     [Header("HUD")]
     public TMP_Text scoreText;
     public TMP_Text comboText;
     public TMP_Text timerText;
 
-    [Header("Audio")]
-    public AudioManager audioMgr;
+    [Header("Audio (optional)")]
+    public AudioManager audioMgr;       // ok if left null
 
     [Header("Config")]
     public int rows = 4;
     public int cols = 4;
-    public float startingTime = 90f;
+    public float startingTime = 90f;    // seconds
 
-    [Header("Game Over UI (optional)")]
-    public GameObject gameOverPanel;
+    [Header("Game Over UI")]
+    public GameObject gameOverPanel;    // panel with results
     public TMP_Text finalScoreText;
     public TMP_Text bestScoreText;
 
-    // runtime
-    int score;
-    int combo;
-    float timeLeft;
-    bool running;
+    // --- runtime state ---
+    int score = 0;
+    int combo = 0;
+    float timeLeft = 0f;
+    bool running = false;
 
-    // input gating
-    bool resolving = false;       // we're resolving a pair (no new clicks)
-    bool inputLocked = false;     // global click gate while resolving
-
+    // click gating
+    bool resolving = false;             // resolving a pair
+    bool inputLocked = false;           // brief lock while showing 2nd card
     readonly List<CardUI> pending = new();
 
     int bestScore;
@@ -47,9 +46,11 @@ public class GameControllerUI : MonoBehaviour
         StartNewGame(rows, cols);
     }
 
+    // Start or restart a run
     public void StartNewGame(int r, int c)
     {
-        rows = r; cols = c;
+        rows = r;
+        cols = c;
 
         score = 0;
         combo = 0;
@@ -61,7 +62,10 @@ public class GameControllerUI : MonoBehaviour
 
         if (gameOverPanel) gameOverPanel.SetActive(false);
 
-        grid.Generate(rows, cols, new System.Random());   // your spawner
+        // Build grid
+        if (grid)
+            grid.Generate(rows, cols, new System.Random());
+
         UpdateUI();
     }
 
@@ -74,15 +78,18 @@ public class GameControllerUI : MonoBehaviour
         {
             timeLeft = 0f;
             running = false;
+
+            // Time-up (lose)
             if (audioMgr) audioMgr.GameOver();
-            FinishRun();
+            FinishRun(false);
         }
 
         UpdateUI();
     }
 
-    void FinishRun()
+    void FinishRun(bool won)
     {
+        // Persist best score
         if (score > bestScore)
         {
             bestScore = score;
@@ -90,7 +97,11 @@ public class GameControllerUI : MonoBehaviour
             PlayerPrefs.Save();
         }
 
-        if (finalScoreText) finalScoreText.text = $"Score: {score}";
+        if (finalScoreText)
+        {
+            finalScoreText.text = won ? $"You Win!  Score: {score}"
+                                      : $"Time's Up  Score: {score}";
+        }
         if (bestScoreText) bestScoreText.text = $"Best: {bestScore}";
         if (gameOverPanel) gameOverPanel.SetActive(true);
     }
@@ -99,15 +110,18 @@ public class GameControllerUI : MonoBehaviour
     {
         if (scoreText) scoreText.text = $"Score: {score}";
         if (comboText) comboText.text = combo > 0 ? $"Combo: x{combo}" : "Combo: -";
+
         if (timerText)
         {
             timerText.text = FormatTime(timeLeft);
-            var t = Mathf.InverseLerp(20f, 0f, timeLeft);
-            timerText.color = Color.Lerp(Color.white, new Color(1f, .3f, .3f), t);
+
+            // subtle urgency color shift under 20s
+            float t = Mathf.InverseLerp(20f, 0f, timeLeft);
+            timerText.color = Color.Lerp(Color.white, new Color(1f, 0.3f, 0.3f), t);
         }
     }
 
-    string FormatTime(float t)
+    static string FormatTime(float t)
     {
         t = Mathf.Max(0f, t);
         int m = Mathf.FloorToInt(t / 60f);
@@ -115,15 +129,15 @@ public class GameControllerUI : MonoBehaviour
         return $"{m:00}:{s:00}";
     }
 
-    // ====== CLICK FLOW ======
+    // ===== CLICK FLOW =====
 
-    // Card asks: may I accept a click right now?
+    // Cards call this before accepting a click
     public bool CanAcceptClick()
     {
         return running && !resolving && !inputLocked;
     }
 
-    // Card informs: I have just flipped up and am ready to be evaluated.
+    // Cards notify here after they flip up
     public void OnCardFlippedUp(CardUI card)
     {
         if (!running || resolving || inputLocked) return;
@@ -133,7 +147,7 @@ public class GameControllerUI : MonoBehaviour
 
         if (pending.Count == 2)
         {
-            // lock immediately to prevent a 3rd click during the 0.25s reveal
+            // lock now so a 3rd click can't sneak in during the small reveal delay
             inputLocked = true;
             resolving = true;
             StartCoroutine(ResolvePair());
@@ -142,7 +156,7 @@ public class GameControllerUI : MonoBehaviour
 
     IEnumerator ResolvePair()
     {
-        // small reveal delay
+        // brief reveal so player sees both faces
         yield return new WaitForSeconds(0.25f);
 
         var a = pending[0];
@@ -150,6 +164,7 @@ public class GameControllerUI : MonoBehaviour
 
         if (a.CardId == b.CardId)
         {
+            // MATCH
             combo++;
             score += 100 * combo;
             if (audioMgr) audioMgr.Match(combo);
@@ -158,15 +173,17 @@ public class GameControllerUI : MonoBehaviour
             yield return StartCoroutine(a.Vanish());
             yield return StartCoroutine(b.Vanish());
 
-            if (AllCardsGone())
+            // Win when all cards under 'board' are matched (we keep slots active)
+            if (AllCardsMatched())
             {
                 running = false;
-                if (audioMgr) audioMgr.GameOver();
-                FinishRun();
+                if (audioMgr) audioMgr.Win();   // NEW: distinct win sound
+                FinishRun(true);
             }
         }
         else
         {
+            // MISS
             combo = 0;
             score = Mathf.Max(0, score - 20);
             if (audioMgr) audioMgr.Miss();
@@ -181,16 +198,20 @@ public class GameControllerUI : MonoBehaviour
         UpdateUI();
     }
 
-    bool AllCardsGone()
+    bool AllCardsMatched()
     {
         if (!board) return false;
+
+        // We don’t rely on activeSelf (cards remain active to keep their grid slots).
         for (int i = 0; i < board.childCount; i++)
-            if (board.GetChild(i).gameObject.activeSelf)
-                return false;
+        {
+            var cu = board.GetChild(i).GetComponent<CardUI>();
+            if (cu && !cu.IsMatched) return false;
+        }
         return true;
     }
 
-    // UI Button
+    // UI Button hook
     public void OnRestartButton()
     {
         if (gameOverPanel) gameOverPanel.SetActive(false);
