@@ -724,9 +724,9 @@ MonoBehaviour:
   comboText: {fileID: 77404184}
   timerText: {fileID: 1761015969}
   audioMgr: {fileID: 1304800187}
-  rows: 3
+  rows: 4
   cols: 3
-  startingTime: 90
+  startingTime: 20
   gameOverPanel: {fileID: 25602193}
   finalScoreText: {fileID: 29175462}
   bestScoreText: {fileID: 848197192}
@@ -874,7 +874,7 @@ RectTransform:
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: 0, y: -43}
-  m_SizeDelta: {x: 2066, y: 900}
+  m_SizeDelta: {x: 1000, y: 900}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &751747578
 MonoBehaviour:

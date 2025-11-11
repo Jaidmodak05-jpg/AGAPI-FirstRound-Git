@@ -151,30 +151,31 @@ public class CardUI : MonoBehaviour, IPointerClickHandler
 
     public IEnumerator Vanish()
     {
-        IsMatched = true;
+        // mark state
         IsLocked = true;
+        IsMatched = true;
 
         var cg = GetComponent<CanvasGroup>();
         if (!cg) cg = gameObject.AddComponent<CanvasGroup>();
 
-        // little pop then fade
-        var rt = (RectTransform)transform;
-        float popT = 0f;
-        while (popT < 0.08f)
-        {
-            popT += Time.deltaTime;
-            rt.localScale = Vector3.Lerp(Vector3.one, Vector3.one * 1.12f, popT / 0.08f);
-            yield return null;
-        }
-
         float t = 0f;
-        while (t < 0.25f)
+        const float fadeDur = 0.20f; // ~0.2s
+        while (t < fadeDur)
         {
             t += Time.deltaTime;
-            cg.alpha = 1f - (t / 0.25f);
+            cg.alpha = 1f - Mathf.Clamp01(t / fadeDur);
             yield return null;
         }
 
-        gameObject.SetActive(false);
+   
+        cg.alpha = 0f;
+        cg.interactable = false;
+        cg.blocksRaycasts = false;
+
+        // turn off visuals so nothing renders even if alpha is adjusted later
+        if (frontImage) frontImage.enabled = false;
+        if (front) front.SetActive(false);
+        if (back) back.SetActive(false);
+
     }
 }
