@@ -1,152 +1,86 @@
-﻿using UnityEngine;
+﻿using System.Collections;
+using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
-using System.Collections;
 
 [RequireComponent(typeof(RectTransform))]
 public class CardUI : MonoBehaviour, IPointerClickHandler
 {
-    [Header("Assign in Prefab (ROOT Card)")]
-    [SerializeField] GameObject front;     // child named "Front"
-    [SerializeField] GameObject back;      // child named "Back"
-    [SerializeField] Image frontImage;// Image under Front
+    [Header("Assign in Prefab (ROOT: Card)")]
+    [SerializeField] GameObject front;           // child "Front"
+    [SerializeField] GameObject back;            // child "Back"
+    [SerializeField] Image frontImage;           // Image inside "Front"
 
-    [Header("Flip Settings")]
-    [SerializeField] float flipDuration = 0.22f;
+    [Header("Optional")]
+    [SerializeField] float flipDuration = 0.22f; // seconds
 
-    [HideInInspector] public GameControllerUI controller;  // set by GridGenerator
-    [HideInInspector] public AudioManager audioMgr;    // set by GridGenerator
+    // Set by spawner:
+    [HideInInspector] public GameControllerUI controller;
+    [HideInInspector] public AudioManager audioMgr;
 
-    public int CardId { get; private set; }
-    public bool IsFaceUp { get; private set; }
-    public bool IsMatched { get; private set; }
-    public bool IsLocked { get; private set; }
+    public int CardId { get; private set; } = -1;
+    public bool IsFaceUp { get; private set; } = false;
+    public bool IsMatched { get; private set; } = false;
+    public bool IsLocked { get; private set; } = false;
 
-    bool _animating = false;   // prevents overlapping animations
-
-    void Awake()
-    {
-        ShowFace(false);
-    }
-
-    public void Init(int id, Sprite faceSprite)
+    public void Init(int id, Sprite face, GameControllerUI owner, AudioManager audio)
     {
         CardId = id;
-        if (frontImage) frontImage.sprite = faceSprite;
-
-        IsFaceUp = false;
+        controller = owner;
+        audioMgr = audio;
+        SetFrontSprite(face);
+        ShowFace(false, instant: true);
         IsMatched = false;
         IsLocked = false;
-        _animating = false;
-
-        ShowFace(false);
     }
 
-    public void SetMatched()
+    // --- Public helpers used by Grid/Game ---
+    public void SetFrontSprite(Sprite face)
     {
-        IsMatched = true;
-        IsLocked = true;
+        if (frontImage) frontImage.sprite = face;
     }
 
-    public void Lock(bool v) { IsLocked = v; }
-
-    void ShowFace(bool faceUp)
+    public void ShowFace(bool faceUp, bool instant = false)
     {
-        if (front)
-        {
-            front.SetActive(faceUp);
-            if (frontImage)
-            {
-                frontImage.enabled = faceUp;
-                if (faceUp) frontImage.color = Color.white;
-            }
-            if (faceUp) front.transform.SetAsLastSibling();
-        }
-        if (back) back.SetActive(!faceUp);
-
         IsFaceUp = faceUp;
-    }
-
-    public void OnPointerClick(PointerEventData _)
-    {
-        if (IsLocked || IsMatched || _animating) return;
-        if (IsFaceUp) return; // already up
-        if (controller && !controller.CanAcceptClick()) return;
-
-        StartCoroutine(FlipAndNotify());
-    }
-
-    IEnumerator FlipAndNotify()
-    {
-        IsLocked = true;
-        _animating = true;
-
-        yield return StartCoroutine(FlipUp());
-
-        _animating = false;
-        IsLocked = false;
-
-        if (controller) controller.OnCardFlippedUp(this);
+        if (instant)
+        {
+            if (front) front.SetActive(faceUp);
+            if (back) back.SetActive(!faceUp);
+            return;
+        }
+        StopAllCoroutines();
+        StartCoroutine(faceUp ? FlipUp() : FlipDown());
     }
 
     public IEnumerator FlipUp()
     {
-        if (IsFaceUp || IsMatched) yield break;
+        if (IsLocked || IsMatched || IsFaceUp) yield break;
+        IsLocked = true;
 
-        Transform tr = transform;
-        float half = Mathf.Max(0.01f, flipDuration * 0.5f);
+        // simple swap (UI) – you can replace by animation later
+        if (back) back.SetActive(false);
+        if (front) front.SetActive(true);
 
-        float t = 0f;
-        while (t < half)
-        {
-            t += Time.deltaTime;
-            tr.localScale = new Vector3(1f - (t / half), 1f, 1f);
-            yield return null;
-        }
-        tr.localScale = new Vector3(0f, 1f, 1f);
+        audioMgr?.Flip();
+        yield return new WaitForSeconds(flipDuration);
 
-        ShowFace(true);
-
-        t = 0f;
-        while (t < half)
-        {
-            t += Time.deltaTime;
-            tr.localScale = new Vector3((t / half), 1f, 1f);
-            yield return null;
-        }
-        tr.localScale = Vector3.one;
-
-        if (audioMgr) audioMgr.Flip();
+        IsFaceUp = true;
+        IsLocked = false;
     }
 
     public IEnumerator FlipDown()
     {
-        if (!IsFaceUp || IsMatched) yield break;
+        if (IsLocked || !IsFaceUp || IsMatched) yield break;
+        IsLocked = true;
 
-        Transform tr = transform;
-        float half = Mathf.Max(0.01f, flipDuration * 0.5f);
+        if (front) front.SetActive(false);
+        if (back) back.SetActive(true);
 
-        float t = 0f;
-        while (t < half)
-        {
-            t += Time.deltaTime;
-            tr.localScale = new Vector3(1f - (t / half), 1f, 1f);
-            yield return null;
-        }
-        tr.localScale = new Vector3(0f, 1f, 1f);
+        yield return new WaitForSeconds(flipDuration);
 
-        ShowFace(false);
-
-        t = 0f;
-        while (t < half)
-        {
-            t += Time.deltaTime;
-            tr.localScale = new Vector3((t / half), 1f, 1f);
-            yield return null;
-        }
-        tr.localScale = Vector3.one;
-
-        if (audioMgr) audioMgr.Flip();
+        IsFaceUp = false;
+        IsLocked = false;
     }
 
     public IEnumerator Vanish()
@@ -155,27 +89,36 @@ public class CardUI : MonoBehaviour, IPointerClickHandler
         IsLocked = true;
         IsMatched = true;
 
+        // fade out but keep layout slot
         var cg = GetComponent<CanvasGroup>();
         if (!cg) cg = gameObject.AddComponent<CanvasGroup>();
 
         float t = 0f;
-        const float fadeDur = 0.20f; // ~0.2s
+        const float fadeDur = 0.20f;
         while (t < fadeDur)
         {
             t += Time.deltaTime;
             cg.alpha = 1f - Mathf.Clamp01(t / fadeDur);
             yield return null;
         }
-
-   
         cg.alpha = 0f;
         cg.interactable = false;
         cg.blocksRaycasts = false;
 
-        // turn off visuals so nothing renders even if alpha is adjusted later
         if (frontImage) frontImage.enabled = false;
         if (front) front.SetActive(false);
         if (back) back.SetActive(false);
+        // DO NOT deactivate this GameObject – keeps its slot in the GridLayoutGroup
+    }
 
+    // --- Clicks ---
+    public void OnPointerClick(PointerEventData eventData)
+    {
+        if (!controller || !controller.CanAcceptClick() || IsLocked || IsMatched || IsFaceUp) return;
+
+        // do the visual flip right away
+        StartCoroutine(FlipUp());
+        // let controller resolve pairs
+        controller.OnCardFlippedUp(this);
     }
 }
