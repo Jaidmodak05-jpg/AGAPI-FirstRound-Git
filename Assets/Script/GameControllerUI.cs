@@ -1,7 +1,9 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
-using UnityEngine;
 using TMPro;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 public class GameControllerUI : MonoBehaviour
 {
@@ -15,32 +17,58 @@ public class GameControllerUI : MonoBehaviour
     public TMP_Text timerText;
 
     [Header("Audio (optional)")]
-    public AudioManager audioMgr;
+    public AudioManager audioMgr;   // ok if null
 
-    [Header("Config")]
+    [Header("Config (fallbacks when launching Game scene directly)")]
     public int rows = 4;
     public int cols = 4;
-    public int startingTime = 30; // seconds
+    public int startingTime = 30;   // will be overwritten by GameSettings
 
     [Header("Game Over UI")]
     public GameObject gameOverPanel;
     public TMP_Text finalScoreText;
     public TMP_Text bestScoreText;
+    public Button restartButton;          // hook in inspector
+    public Button mainMenuFromGameOver;   // NEW: optional, hook if you add a Main Menu btn on the panel
+
+    [Header("Pause UI (optional)")]
+    public GameObject pausePanel;         // panel with Resume/Restart/Main Menu buttons (can be null)
 
     // --- runtime state ---
-    readonly List<CardUI> allCards = new();
-    readonly List<CardUI> pending = new();
-    bool resolving = false;
+    private readonly List<CardUI> allCards = new();
+    private readonly List<CardUI> pending = new();
+    private bool resolving = false;
 
-    int score = 0;
-    int combo = 0;
-    int bestScore = 0;
-    int remainingCards = 0;
-    float timeLeft = 0f;
-    bool running = false;
+    private int score = 0;
+    private int combo = 0;
+    private int bestScore = 0;  // simple session best
+    private int remainingCards = 0;
+    private float timeLeft = 0f;
+    private bool running = false;
+    private bool inputLocked = false;
+    private bool paused = false;
+
+    // tuning
+    private const int matchReward = 100;
+    private const int missPenalty = 25; // score deduction on mismatch
+
+    void Awake()
+    {
+        // Make sure we never enter the scene paused
+        Time.timeScale = 1f;
+    }
 
     void Start()
     {
+        // Pull what the menu chose
+        rows = GameSettings.Rows;
+        cols = GameSettings.Cols;
+        startingTime = GameSettings.StartingTime;
+
+        // Optional wire-ups if you forgot to set them in the Inspector
+        if (mainMenuFromGameOver)
+            mainMenuFromGameOver.onClick.AddListener(OnMainMenuButton);
+
         StartNewGame(rows, cols);
     }
 
@@ -49,70 +77,67 @@ public class GameControllerUI : MonoBehaviour
         rows = r;
         cols = c;
 
+        // safety: if we restarted from pause, unpause
+        Resume(silent: true);
+
         score = 0;
         combo = 0;
         timeLeft = startingTime;
         running = true;
         resolving = false;
+        inputLocked = false;
         pending.Clear();
 
         if (gameOverPanel) gameOverPanel.SetActive(false);
+        if (pausePanel) pausePanel.SetActive(false);
 
         // Build grid
         if (grid)
         {
-            var rnd = new System.Random(); // different per run
             allCards.Clear();
-            allCards.AddRange(grid.Generate(rows, cols, rnd, this, audioMgr));
-
-            remainingCards = allCards.Count;
+            allCards.AddRange(grid.Generate(rows, cols, new System.Random(), this, audioMgr));
         }
 
+        remainingCards = allCards.Count;
         UpdateUI();
+        UpdateTimerUI();
     }
 
     void Update()
     {
-        if (!running) return;
+        // Keyboard toggle (Escape) if you like; or call OnTogglePauseKey from a UI button
+        if (Input.GetKeyDown(KeyCode.Escape))
+            TogglePause();
+
+        if (!running || paused) return;
 
         timeLeft -= Time.deltaTime;
         if (timeLeft <= 0f)
         {
             timeLeft = 0f;
             running = false;
-            OnGameOver(false); // time out
+            ShowGameOver(false);
         }
-
-        UpdateUI();
+        UpdateTimerUI();
     }
 
-    void UpdateUI()
+    // --------- Card events ----------
+    public bool CanAcceptClick()
     {
-        if (scoreText) scoreText.text = $"Score: {score}";
-        if (comboText) comboText.text = combo > 0 ? $"Combo: x{combo}" : "Combo: -";
-        if (timerText) timerText.text = timeLeft > 0 ? $"{timeLeft:00}" : "00";
+        if (!running) return false;
+        if (paused) return false;
+        if (inputLocked) return false;
+        if (resolving) return false;
+        return true;
     }
-
-    // --- Input gating from CardUI ---
-    public bool CanAcceptClick() => running && !resolving;
 
     public void OnCardFlippedUp(CardUI card)
     {
-        if (!running || card.IsMatched) return;
+        if (!running || paused) return;
 
         pending.Add(card);
-
         if (pending.Count == 2 && !resolving)
-        {
             StartCoroutine(ResolvePair());
-        }
-        else if (pending.Count > 2)
-        {
-            // safety: if third somehow slips in, flip it back
-            var extra = pending[pending.Count - 1];
-            pending.RemoveAt(pending.Count - 1);
-            StartCoroutine(extra.FlipDown());
-        }
     }
 
     IEnumerator ResolvePair()
@@ -122,35 +147,36 @@ public class GameControllerUI : MonoBehaviour
         var a = pending[0];
         var b = pending[1];
 
-        // tiny delay so player can see
+        // tiny delay so player sees both faces
         yield return new WaitForSeconds(0.25f);
 
         if (a.CardId == b.CardId)
         {
-            // MATCH
+            // match!
             combo++;
-            score += 100 * combo;
-            audioMgr?.Match(combo);
+            score += matchReward + (combo - 1) * 10; // small streak bonus
+            if (audioMgr) audioMgr.Match(combo);
 
-            yield return StartCoroutine(a.Vanish());
-            yield return StartCoroutine(b.Vanish());
+            yield return a.StartCoroutine(a.Vanish());
+            yield return b.StartCoroutine(b.Vanish());
 
             remainingCards -= 2;
 
+            // Win?
             if (remainingCards <= 0)
             {
                 running = false;
-                OnGameOver(true); // win
+                ShowGameOver(true);
             }
         }
         else
         {
-            // MISS
             combo = 0;
-            audioMgr?.Miss();
+            score = Mathf.Max(0, score - missPenalty);
+            if (audioMgr) audioMgr.Miss();
 
-            yield return StartCoroutine(a.FlipDown());
-            yield return StartCoroutine(b.FlipDown());
+            yield return a.StartCoroutine(a.FlipDown());
+            yield return b.StartCoroutine(b.FlipDown());
         }
 
         pending.Clear();
@@ -158,22 +184,83 @@ public class GameControllerUI : MonoBehaviour
         UpdateUI();
     }
 
-    // --- End states ---
-    void OnGameOver(bool won)
+    // --------- UI helpers ----------
+    void UpdateUI()
     {
-        if (won) audioMgr?.Win(); else audioMgr?.GameOver();
+        if (scoreText) scoreText.text = $"Score: {score}";
+        if (comboText) comboText.text = combo > 0 ? $"Combo: x{combo}" : "Combo: -";
+    }
 
-        // Best score
+    void UpdateTimerUI()
+    {
+        if (!timerText) return;
+
+        int t = Mathf.CeilToInt(timeLeft);
+        int m = t / 60;
+        int s = t % 60;
+        timerText.text = $"{m:00}:{s:00}";
+    }
+
+    void ShowGameOver(bool won)
+    {
         if (score > bestScore) bestScore = score;
 
         if (gameOverPanel) gameOverPanel.SetActive(true);
-        if (finalScoreText) finalScoreText.text = won ? $"You Win!\nScore: {score}" : $"Time Up!\nScore: {score}";
+        if (finalScoreText) finalScoreText.text = won ? $"YOU WIN!\nScore: {score}" : $"Time’s up!\nScore: {score}";
         if (bestScoreText) bestScoreText.text = $"Best: {bestScore}";
+
+        if (audioMgr)
+        {
+            if (won) audioMgr.Win();
+            else audioMgr.GameOver();
+        }
     }
 
-    // Hook this to your Restart button
+    // --------- Buttons / external UI calls ----------
     public void OnRestartButton()
     {
-        StartNewGame(rows, cols);
+        if (!running) // allow when panel is shown
+            StartNewGame(rows, cols);
+        else         // or from pause menu
+            StartNewGame(rows, cols);
+    }
+
+    public void OnMainMenuButton()
+    {
+        // Always clear pause state/timescale before leaving
+        Time.timeScale = 1f;
+        paused = false;
+        SceneManager.LoadScene("MainMenu");
+    }
+
+    public void OnPauseButton() => TogglePause();
+    public void OnResumeButton() => Resume();
+
+    public void OnTogglePauseKey() => TogglePause(); // expose for UI if needed
+
+    // --------- Pause logic ----------
+    public void TogglePause()
+    {
+        if (!running) return; // no pausing on game over
+        if (paused) Resume();
+        else Pause();
+    }
+
+    public void Pause()
+    {
+        if (paused) return;
+        paused = true;
+        Time.timeScale = 0f;
+        inputLocked = true;
+        if (pausePanel) pausePanel.SetActive(true);
+    }
+
+    public void Resume(bool silent = false)
+    {
+        if (!paused && silent == false) { if (pausePanel) pausePanel.SetActive(false); }
+        paused = false;
+        Time.timeScale = 1f;
+        inputLocked = false;
+        if (pausePanel) pausePanel.SetActive(false);
     }
 }
